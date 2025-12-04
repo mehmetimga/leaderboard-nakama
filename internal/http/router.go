@@ -6,10 +6,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/ai-campions/leaderboard-nakama/internal/websocket"
 )
 
 // NewRouter creates a new HTTP router with all routes configured
-func NewRouter(handler *Handler) *chi.Mux {
+func NewRouter(handler *Handler, wsHandler *websocket.Handler) *chi.Mux {
 	r := chi.NewRouter()
 
 	// Middleware
@@ -22,6 +24,11 @@ func NewRouter(handler *Handler) *chi.Mux {
 
 	// Health check
 	r.Get("/health", handler.HealthCheck)
+
+	// WebSocket endpoint
+	if wsHandler != nil {
+		r.Get("/ws", wsHandler.ServeWS)
+	}
 
 	// API routes
 	r.Route("/api/v1", func(r chi.Router) {
@@ -58,4 +65,3 @@ func corsMiddleware(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
-

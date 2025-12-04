@@ -72,3 +72,16 @@ load-test-read: ## Run load test for leaderboard retrieval
 	hey -n 1000 -c 50 \
 		http://localhost:8080/api/v1/leaderboards/global_scores?type=live&limit=100
 
+# Data seeding and live testing
+seed: ## Seed leaderboard with random data (20 users)
+	@./scripts/seed_data.sh
+
+live-feed: ## Start live feed (continuous score submission every 2s)
+	@INTERVAL=2 ./scripts/live_feed.sh
+
+feed-go: ## Run Go-based data feeder (--seed for initial data, otherwise live feed)
+	@go run ./scripts/feed_data.go $(ARGS)
+
+seed-go: ## Seed 50 users using Go feeder
+	@go run ./scripts/feed_data.go --seed --seed-count=50
+

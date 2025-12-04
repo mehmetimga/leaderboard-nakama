@@ -1,26 +1,40 @@
 # Leaderboard Service with Nakama
 
-A production-ready leaderboard service built with Go and [Nakama](https://heroiclabs.com/nakama/), featuring real-time rankings and periodic snapshots for official leaderboards.
+A production-ready leaderboard service built with Go and [Nakama](https://heroiclabs.com/nakama/), featuring **real-time rankings via WebSocket** and a stunning React UI.
+
+![Architecture](https://img.shields.io/badge/Backend-Go%201.23-00ADD8?style=flat&logo=go)
+![Frontend](https://img.shields.io/badge/Frontend-React%20+%20Vite-61DAFB?style=flat&logo=react)
+![Nakama](https://img.shields.io/badge/Game%20Backend-Nakama-7B2CBF?style=flat)
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Leaderboard API                          │
-│                         (Go + Chi)                              │
+│                      React Web UI (:3000)                       │
+│              Real-time updates via WebSocket                    │
 ├─────────────────────────────────────────────────────────────────┤
-│                                                                 │
-│  ┌─────────────┐    ┌──────────────┐    ┌─────────────────┐   │
-│  │   HTTP      │    │  Leaderboard │    │   Background    │   │
-│  │  Handlers   │───▶│   Service    │◀───│    Worker       │   │
-│  └─────────────┘    └──────────────┘    └─────────────────┘   │
-│                            │                     │             │
-│              ┌─────────────┴─────────────┐      │             │
-│              ▼                           ▼      ▼             │
-│       ┌────────────┐              ┌────────────────┐          │
-│       │   Nakama   │              │   PostgreSQL   │          │
-│       │  (Live LB) │              │ (Official LB)  │          │
-│       └────────────┘              └────────────────┘          │
+                              │ WebSocket
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Leaderboard API (:8080)                      │
+│                      (Go + Chi + WS Hub)                        │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
+│  │   HTTP      │  │  WebSocket   │  │    Background         │  │
+│  │  Handlers   │  │     Hub      │  │    Worker             │  │
+│  └──────┬──────┘  └──────┬───────┘  └───────────┬───────────┘  │
+│         └────────────────┼──────────────────────┘              │
+│                          ▼                                      │
+│                 ┌──────────────┐                                │
+│                 │  Leaderboard │                                │
+│                 │   Service    │                                │
+│                 └──────┬───────┘                                │
+│         ┌──────────────┴──────────────┐                        │
+│         ▼                             ▼                        │
+│  ┌────────────┐               ┌────────────────┐               │
+│  │   Nakama   │               │   PostgreSQL   │               │
+│  │  (Live LB) │               │ (Official LB)  │               │
+│  └────────────┘               └────────────────┘               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -62,7 +76,9 @@ docker-compose down
 ```
 
 Services will be available at:
+- **Web UI**: http://localhost:3000 ⭐
 - **Leaderboard API**: http://localhost:8080
+- **WebSocket**: ws://localhost:8080/ws
 - **Nakama Console**: http://localhost:7351 (admin/password)
 - **Nakama HTTP API**: http://localhost:7350
 - **PostgreSQL**: localhost:5432
@@ -79,7 +95,15 @@ docker-compose up -d postgres nakama
 # Run the API locally
 go run ./cmd/api
 
-# Run tests
+# In another terminal, run the frontend
+cd web
+npm install
+npm run dev
+```
+
+### Run Tests
+
+```bash
 go test ./...
 ```
 
@@ -269,6 +293,174 @@ curl -X POST http://localhost:7350/v2/console/leaderboard \
 ├── docker-compose.yml    # Docker setup
 ├── Dockerfile           # Multi-stage build
 └── README.md
+```
+
+## Data Seeding & Live Testing
+
+The project includes scripts for seeding test data and testing real-time functionality.
+
+### Available Scripts
+
+| Script | Description | Usage |
+|--------|-------------|-------|
+| `scripts/seed_data.sh` | Seeds 20 random users with gamer names | `./scripts/seed_data.sh` |
+| `scripts/live_feed.sh` | Continuous score submission (configurable) | `INTERVAL=2 ./scripts/live_feed.sh` |
+| `scripts/feed_data.go` | High-performance Go data feeder | `go run ./scripts/feed_data.go` |
+
+### Seed Data
+
+```bash
+# Using shell script (creates 20 random users)
+./scripts/seed_data.sh
+
+# Using Go feeder (creates 50 random users)
+make seed-go
+
+# Or use the Makefile
+make seed
+```
+
+**Example Output:**
+```
+🎮 Seeding leaderboard: global_scores
+📊 Creating 20 users...
+
+✅ TurboNova1: 16947 pts
+✅ DarkShadow2: 31679 pts
+✅ TurboGhost3: 9949 pts
+✅ UltraKnight5: 30835 pts
+...
+
+🏆 Seeding complete!
+📈 View leaderboard at: http://localhost:8080/api/v1/leaderboards/global_scores
+```
+
+### Live Feed (for real-time testing)
+
+```bash
+# Start continuous score submission (every 2 seconds)
+./scripts/live_feed.sh
+
+# With custom interval (5 seconds)
+INTERVAL=5 ./scripts/live_feed.sh
+
+# Or use the Makefile
+make live-feed
+```
+
+**Example Output:**
+```
+🔴 LIVE FEED STARTED
+📡 Submitting scores every 2s to: global_scores
+🛑 Press Ctrl+C to stop
+
+[10:15:32] 🏆 #1 HIGH SCORE! SwiftLegend144: 85432 pts
+[10:15:34] ⭐ #2 DarkPhantom99: 62150 pts
+[10:15:36] 📊 #3 CyberNinja42: 28900 pts
+```
+
+### Go Data Feeder (high-performance)
+
+```bash
+# Continuous feed (1 submission per second)
+go run ./scripts/feed_data.go
+
+# Seed mode (50 users, then exit)
+go run ./scripts/feed_data.go --seed --seed-count=50
+
+# Custom interval and burst (3 submissions every 500ms)
+go run ./scripts/feed_data.go --interval=500ms --burst=3
+
+# Custom API URL
+go run ./scripts/feed_data.go --url=http://api.example.com:8080
+```
+
+**Options:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--url` | `http://localhost:8080` | API base URL |
+| `--lb` | `global_scores` | Leaderboard ID |
+| `--interval` | `1s` | Time between submissions |
+| `--burst` | `1` | Submissions per interval |
+| `--seed` | `false` | Seed mode (batch insert, then exit) |
+| `--seed-count` | `50` | Number of users to seed |
+
+## Testing Real-time Updates
+
+### Step 1: Start the Stack
+
+```bash
+# Terminal 1: Start backend services
+docker-compose up -d postgres nakama
+sleep 15  # Wait for Nakama to initialize
+
+# Start the API (use port 5434 if local postgres conflicts)
+POSTGRES_PORT=5434 POSTGRES_PASSWORD=localdb POSTGRES_DB=nakama go run ./cmd/api
+```
+
+```bash
+# Terminal 2: Start the frontend
+cd web && npm run dev
+```
+
+### Step 2: Open the UI
+
+Open http://localhost:5173 in your browser. You should see:
+- ✅ **API** indicator (green = connected)
+- ✅ **WebSocket** indicator (green = connected)
+- 🏆 **Global Rankings** section with player count
+
+### Step 3: Seed Initial Data
+
+```bash
+# Terminal 3: Seed data
+./scripts/seed_data.sh
+```
+
+### Step 4: Test Real-time Updates
+
+```bash
+# Start live feed in background
+INTERVAL=3 ./scripts/live_feed.sh
+```
+
+Watch the browser - scores should update in real-time!
+
+### Step 5: Submit via UI
+
+1. Click **🎲 Generate Random** to fill in random data
+2. Click **Submit Score**
+3. Watch the leaderboard update instantly
+
+## Latest Test Results
+
+```
+Total Players: 153
+┌──────┬──────────────────┬─────────┐
+│ Rank │ Player           │ Score   │
+├──────┼──────────────────┼─────────┤
+│ 🥇 1 │ SwiftLegend144   │ 35,173  │
+│ 🥈 2 │ SwiftWarrior448  │ 33,222  │
+│ 🥉 3 │ SilentNinja8     │ 33,039  │
+│   4  │ CyberRaven16     │ 32,957  │
+│   5  │ DarkPhantom2     │ 32,827  │
+│   6  │ ThunderPhoenix10 │ 32,687  │
+│   7  │ StormBlaze2      │ 32,657  │
+│   8  │ DarkNinja17      │ 32,402  │
+│   9  │ UltraStorm12     │ 31,686  │
+│  10  │ DarkShadow2      │ 31,679  │
+└──────┴──────────────────┴─────────┘
+```
+
+### Verify via API
+
+```bash
+# Get top 10 leaderboard
+curl -s "http://localhost:8080/api/v1/leaderboards/global_scores?type=live&limit=10" | jq '.data.records[] | {rank, username, score}'
+
+# Health check with WebSocket client count
+curl -s http://localhost:8080/health
+# {"success":true,"data":{"status":"healthy","ws_clients":2}}
 ```
 
 ## Performance Testing

@@ -90,7 +90,7 @@ func (m *mockRepository) HealthCheck(ctx context.Context) error {
 func TestSubmitScoreHandler(t *testing.T) {
 	t.Run("invalid request body", func(t *testing.T) {
 		service := leaderboard.NewService(&mockNakamaClient{}, &mockRepository{})
-		handler := NewHandler(service)
+		handler := NewHandler(service, nil)
 
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/scores", bytes.NewReader([]byte("invalid json")))
 		req.Header.Set("Content-Type", "application/json")
@@ -108,7 +108,7 @@ func TestSubmitScoreHandler(t *testing.T) {
 
 	t.Run("valid request", func(t *testing.T) {
 		service := leaderboard.NewService(&mockNakamaClient{}, &mockRepository{})
-		handler := NewHandler(service)
+		handler := NewHandler(service, nil)
 
 		body := SubmitScoreRequest{
 			LeaderboardID: "global_scores",
@@ -133,7 +133,7 @@ func TestSubmitScoreHandler(t *testing.T) {
 
 	t.Run("missing required fields", func(t *testing.T) {
 		service := leaderboard.NewService(&mockNakamaClient{}, &mockRepository{})
-		handler := NewHandler(service)
+		handler := NewHandler(service, nil)
 
 		body := SubmitScoreRequest{
 			Score: 1000,
@@ -154,7 +154,7 @@ func TestSubmitScoreHandler(t *testing.T) {
 func TestGetLeaderboardHandler(t *testing.T) {
 	t.Run("missing leaderboard id", func(t *testing.T) {
 		service := leaderboard.NewService(&mockNakamaClient{}, &mockRepository{})
-		handler := NewHandler(service)
+		handler := NewHandler(service, nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/leaderboards/", nil)
 		rec := httptest.NewRecorder()
@@ -180,7 +180,7 @@ func TestGetLeaderboardHandler(t *testing.T) {
 			},
 		}
 		service := leaderboard.NewService(mockNakama, &mockRepository{})
-		handler := NewHandler(service)
+		handler := NewHandler(service, nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/leaderboards/global_scores?limit=10", nil)
 		rec := httptest.NewRecorder()
@@ -202,7 +202,7 @@ func TestGetLeaderboardHandler(t *testing.T) {
 
 	t.Run("official leaderboard type", func(t *testing.T) {
 		service := leaderboard.NewService(&mockNakamaClient{}, &mockRepository{})
-		handler := NewHandler(service)
+		handler := NewHandler(service, nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/leaderboards/global_scores?type=official&limit=10", nil)
 		rec := httptest.NewRecorder()
@@ -225,7 +225,7 @@ func TestGetLeaderboardHandler(t *testing.T) {
 func TestGetUserRankHandler(t *testing.T) {
 	t.Run("user not found", func(t *testing.T) {
 		service := leaderboard.NewService(&mockNakamaClient{}, &mockRepository{})
-		handler := NewHandler(service)
+		handler := NewHandler(service, nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/leaderboards/global_scores/users/unknown-user", nil)
 		rec := httptest.NewRecorder()
@@ -244,7 +244,7 @@ func TestGetUserRankHandler(t *testing.T) {
 func TestHealthCheckHandler(t *testing.T) {
 	t.Run("healthy", func(t *testing.T) {
 		service := leaderboard.NewService(&mockNakamaClient{}, &mockRepository{})
-		handler := NewHandler(service)
+		handler := NewHandler(service, nil)
 
 		req := httptest.NewRequest(http.MethodGet, "/health", nil)
 		rec := httptest.NewRecorder()
@@ -263,7 +263,7 @@ func TestHealthCheckHandler(t *testing.T) {
 func TestDeleteScoreHandler(t *testing.T) {
 	t.Run("missing parameters", func(t *testing.T) {
 		service := leaderboard.NewService(&mockNakamaClient{}, &mockRepository{})
-		handler := NewHandler(service)
+		handler := NewHandler(service, nil)
 
 		req := httptest.NewRequest(http.MethodDelete, "/api/v1/leaderboards//users/", nil)
 		rec := httptest.NewRecorder()
@@ -280,7 +280,7 @@ func TestDeleteScoreHandler(t *testing.T) {
 
 	t.Run("successful delete", func(t *testing.T) {
 		service := leaderboard.NewService(&mockNakamaClient{}, &mockRepository{})
-		handler := NewHandler(service)
+		handler := NewHandler(service, nil)
 
 		req := httptest.NewRequest(http.MethodDelete, "/api/v1/leaderboards/global_scores/users/user-123", nil)
 		rec := httptest.NewRecorder()

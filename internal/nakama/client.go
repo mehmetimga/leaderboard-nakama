@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/ai-campions/leaderboard-nakama/internal/config"
@@ -21,6 +22,15 @@ type Client struct {
 	baseURL    string
 	serverKey  string
 	httpClient *http.Client
+	
+	// Token cache for users
+	tokenCache map[string]*tokenEntry
+	tokenMu    sync.RWMutex
+}
+
+type tokenEntry struct {
+	token     string
+	expiresAt time.Time
 }
 
 // NewClient creates a new Nakama client
@@ -36,7 +46,15 @@ func NewClient(cfg config.NakamaConfig) *Client {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		tokenCache: make(map[string]*tokenEntry),
 	}
+}
+
+// authResponse from Nakama device auth
+type authResponse struct {
+	Token        string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
+	Created      bool   `json:"created"`
 }
 
 // nakamaLeaderboardRecord matches Nakama's API response structure
@@ -75,16 +93,81 @@ type nakamaWriteRecordResponse struct {
 	UpdateTime    string `json:"update_time"`
 }
 
+// authenticateUser creates or authenticates a user via device ID
+func (c *Client) authenticateUser(ctx context.Context, userID string, username string) (string, error) {
+	// Check cache first
+	c.tokenMu.RLock()
+	if entry, ok := c.tokenCache[userID]; ok {
+		if time.Now().Before(entry.expiresAt) {
+			c.tokenMu.RUnlock()
+			return entry.token, nil
+		}
+	}
+	c.tokenMu.RUnlock()
+
+	// Authenticate via device ID (using userID as device ID)
+	endpoint := fmt.Sprintf("%s/v2/account/authenticate/device?create=true", c.baseURL)
+	
+	body := map[string]string{
+		"id": userID,
+	}
+	if username != "" {
+		endpoint += "&username=" + url.QueryEscape(username)
+	}
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("marshal body: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
+	if err != nil {
+		return "", fmt.Errorf("create request: %w", err)
+	}
+
+	c.setServerKeyAuth(req)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("auth error: status=%d body=%s", resp.StatusCode, string(body))
+	}
+
+	var authResp authResponse
+	if err := json.NewDecoder(resp.Body).Decode(&authResp); err != nil {
+		return "", fmt.Errorf("decode response: %w", err)
+	}
+
+	// Cache the token (tokens typically expire in 2 hours, cache for 1 hour)
+	c.tokenMu.Lock()
+	c.tokenCache[userID] = &tokenEntry{
+		token:     authResp.Token,
+		expiresAt: time.Now().Add(1 * time.Hour),
+	}
+	c.tokenMu.Unlock()
+
+	return authResp.Token, nil
+}
+
 // CreateLeaderboard creates a new leaderboard in Nakama (requires console/admin access)
-// Note: In production, leaderboards are typically created via Nakama server-side Lua/TypeScript
 func (c *Client) CreateLeaderboard(ctx context.Context, cfg leaderboard.LeaderboardConfig) error {
-	// Nakama leaderboards are typically created via server runtime
-	// This is a placeholder - in real usage, you'd use the console API or runtime
 	return nil
 }
 
 // SubmitScore writes a score to the Nakama leaderboard
 func (c *Client) SubmitScore(ctx context.Context, sub leaderboard.ScoreSubmission) (*leaderboard.LeaderboardRecord, error) {
+	// First authenticate the user
+	token, err := c.authenticateUser(ctx, sub.UserID, sub.Username)
+	if err != nil {
+		return nil, fmt.Errorf("authenticate user: %w", err)
+	}
+
 	endpoint := fmt.Sprintf("%s/v2/leaderboard/%s", c.baseURL, sub.LeaderboardID)
 
 	metadata := "{}"
@@ -109,8 +192,8 @@ func (c *Client) SubmitScore(ctx context.Context, sub leaderboard.ScoreSubmissio
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	// Use bearer token auth for user context
-	c.setAuthHeaders(req, sub.UserID)
+	// Use bearer token for user context
+	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
@@ -134,6 +217,12 @@ func (c *Client) SubmitScore(ctx context.Context, sub leaderboard.ScoreSubmissio
 
 // GetLeaderboard fetches leaderboard records from Nakama
 func (c *Client) GetLeaderboard(ctx context.Context, req leaderboard.GetLeaderboardRequest) (*leaderboard.LeaderboardResult, error) {
+	// Need to authenticate to read leaderboards in Nakama
+	token, err := c.getServerToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get server token: %w", err)
+	}
+
 	endpoint := fmt.Sprintf("%s/v2/leaderboard/%s", c.baseURL, req.LeaderboardID)
 
 	params := url.Values{}
@@ -158,7 +247,7 @@ func (c *Client) GetLeaderboard(ctx context.Context, req leaderboard.GetLeaderbo
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	c.setServerKeyAuth(httpReq)
+	httpReq.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -179,6 +268,11 @@ func (c *Client) GetLeaderboard(ctx context.Context, req leaderboard.GetLeaderbo
 	return c.convertRecordList(req.LeaderboardID, &list), nil
 }
 
+// getServerToken returns a cached server-level token for API operations
+func (c *Client) getServerToken(ctx context.Context) (string, error) {
+	return c.authenticateUser(ctx, "server-api-client", "")
+}
+
 // GetUserRecords fetches specific users' records from the leaderboard
 func (c *Client) GetUserRecords(ctx context.Context, leaderboardID string, userIDs []string) ([]leaderboard.LeaderboardRecord, error) {
 	result, err := c.GetLeaderboard(ctx, leaderboard.GetLeaderboardRequest{
@@ -193,6 +287,11 @@ func (c *Client) GetUserRecords(ctx context.Context, leaderboardID string, userI
 
 // GetAroundUser fetches records around a specific user
 func (c *Client) GetAroundUser(ctx context.Context, leaderboardID, userID string, limit int) (*leaderboard.LeaderboardResult, error) {
+	token, err := c.getServerToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get server token: %w", err)
+	}
+
 	endpoint := fmt.Sprintf("%s/v2/leaderboard/%s/owner/%s?limit=%d", c.baseURL, leaderboardID, userID, limit)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -200,7 +299,7 @@ func (c *Client) GetAroundUser(ctx context.Context, leaderboardID, userID string
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
-	c.setServerKeyAuth(req)
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -223,6 +322,12 @@ func (c *Client) GetAroundUser(ctx context.Context, leaderboardID, userID string
 
 // DeleteRecord deletes a user's record from the leaderboard
 func (c *Client) DeleteRecord(ctx context.Context, leaderboardID, userID string) error {
+	// Authenticate the user first
+	token, err := c.authenticateUser(ctx, userID, "")
+	if err != nil {
+		return fmt.Errorf("authenticate user: %w", err)
+	}
+
 	endpoint := fmt.Sprintf("%s/v2/leaderboard/%s", c.baseURL, leaderboardID)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
@@ -230,7 +335,7 @@ func (c *Client) DeleteRecord(ctx context.Context, leaderboardID, userID string)
 		return fmt.Errorf("create request: %w", err)
 	}
 
-	c.setAuthHeaders(req, userID)
+	req.Header.Set("Authorization", "Bearer "+token)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -272,16 +377,6 @@ func (c *Client) HealthCheck(ctx context.Context) error {
 func (c *Client) setServerKeyAuth(req *http.Request) {
 	auth := base64.StdEncoding.EncodeToString([]byte(c.serverKey + ":"))
 	req.Header.Set("Authorization", "Basic "+auth)
-}
-
-// setAuthHeaders sets auth headers for user-context requests
-// In production, you'd use proper session tokens
-func (c *Client) setAuthHeaders(req *http.Request, userID string) {
-	// For server-to-server with user context, we use server key + user ID header
-	c.setServerKeyAuth(req)
-	if userID != "" {
-		req.Header.Set("X-User-ID", userID)
-	}
 }
 
 func (c *Client) convertRecordList(leaderboardID string, list *nakamaLeaderboardRecordList) *leaderboard.LeaderboardResult {
@@ -362,4 +457,3 @@ func (c *Client) convertWriteResponse(r *nakamaWriteRecordResponse, userID strin
 		UpdateTime:    updateTime,
 	}
 }
-

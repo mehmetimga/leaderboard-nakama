@@ -14,6 +14,7 @@ import (
 	"github.com/ai-campions/leaderboard-nakama/internal/leaderboard"
 	"github.com/ai-campions/leaderboard-nakama/internal/nakama"
 	"github.com/ai-campions/leaderboard-nakama/internal/postgres"
+	"github.com/ai-campions/leaderboard-nakama/internal/websocket"
 	"github.com/ai-campions/leaderboard-nakama/internal/worker"
 )
 
@@ -46,9 +47,17 @@ func main() {
 	// Initialize leaderboard service
 	service := leaderboard.NewService(nakamaClient, repo)
 
+	// Initialize WebSocket hub
+	wsHub := websocket.NewHub()
+	go wsHub.Run()
+	log.Println("WebSocket hub started")
+
+	// Initialize WebSocket handler
+	wsHandler := websocket.NewHandler(wsHub, service)
+
 	// Initialize HTTP handler and router
-	handler := httpPkg.NewHandler(service)
-	router := httpPkg.NewRouter(handler)
+	handler := httpPkg.NewHandler(service, wsHub)
+	router := httpPkg.NewRouter(handler, wsHandler)
 
 	// Initialize and start snapshot worker
 	var snapshotWorker *worker.SnapshotWorker
@@ -56,10 +65,8 @@ func main() {
 		snapshotWorker = worker.NewSnapshotWorker(service, repo, cfg.Worker)
 
 		// Register default leaderboards to snapshot
-		// In production, this could be configured via API or config file
 		defaultLeaderboards := os.Getenv("SNAPSHOT_LEADERBOARDS")
 		if defaultLeaderboards != "" {
-			// Parse comma-separated list
 			for _, lb := range splitAndTrim(defaultLeaderboards) {
 				snapshotWorker.RegisterLeaderboard(lb)
 			}
@@ -80,6 +87,7 @@ func main() {
 	// Start server in goroutine
 	go func() {
 		log.Printf("starting server on port %s", cfg.Server.Port)
+		log.Printf("WebSocket available at ws://localhost:%s/ws", cfg.Server.Port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server error: %v", err)
 		}
@@ -138,4 +146,3 @@ func trim(s string) string {
 	}
 	return s[start:end]
 }
-

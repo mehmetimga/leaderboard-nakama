@@ -8,16 +8,21 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ai-campions/leaderboard-nakama/internal/leaderboard"
+	"github.com/ai-campions/leaderboard-nakama/internal/websocket"
 )
 
 // Handler handles HTTP requests for leaderboard operations
 type Handler struct {
 	service *leaderboard.Service
+	wsHub   *websocket.Hub
 }
 
 // NewHandler creates a new HTTP handler
-func NewHandler(service *leaderboard.Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *leaderboard.Service, wsHub *websocket.Hub) *Handler {
+	return &Handler{
+		service: service,
+		wsHub:   wsHub,
+	}
 }
 
 // Response represents a standard API response
@@ -56,6 +61,23 @@ func (h *Handler) SubmitScore(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+
+	// Broadcast score update via WebSocket
+	if h.wsHub != nil {
+		h.wsHub.BroadcastScoreUpdate(req.LeaderboardID, record)
+		
+		// Also broadcast updated leaderboard
+		go func() {
+			result, err := h.service.GetLeaderboard(r.Context(), leaderboard.GetLeaderboardRequest{
+				LeaderboardID: req.LeaderboardID,
+				Type:          leaderboard.LiveLeaderboard,
+				Limit:         100,
+			})
+			if err == nil {
+				h.wsHub.BroadcastLeaderboardUpdate(req.LeaderboardID, result)
+			}
+		}()
 	}
 
 	h.writeJSON(w, http.StatusOK, Response{Success: true, Data: record})
@@ -215,7 +237,18 @@ func (h *Handler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.writeJSON(w, http.StatusOK, Response{Success: true, Data: map[string]string{"status": "healthy"}})
+	wsClients := 0
+	if h.wsHub != nil {
+		wsClients = h.wsHub.GetClientCount()
+	}
+
+	h.writeJSON(w, http.StatusOK, Response{
+		Success: true,
+		Data: map[string]interface{}{
+			"status":     "healthy",
+			"ws_clients": wsClients,
+		},
+	})
 }
 
 func (h *Handler) writeJSON(w http.ResponseWriter, status int, data interface{}) {
@@ -227,4 +260,3 @@ func (h *Handler) writeJSON(w http.ResponseWriter, status int, data interface{})
 func (h *Handler) writeError(w http.ResponseWriter, status int, message string) {
 	h.writeJSON(w, status, Response{Success: false, Error: message})
 }
-
