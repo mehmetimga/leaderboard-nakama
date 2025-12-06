@@ -34,22 +34,22 @@ var (
 	resetFirst    = flag.Bool("reset", true, "Reset leaderboard with fresh 10 users first")
 )
 
-// 10 demo players with memorable names
+// 10 demo players with memorable names (IDs must be 10+ chars for Nakama)
 var demoPlayers = []struct {
 	ID       string
 	Username string
 	Emoji    string
 }{
-	{"demo-001", "🦊 FireFox", "🦊"},
-	{"demo-002", "🐉 Dragon", "🐉"},
-	{"demo-003", "🦅 Eagle", "🦅"},
-	{"demo-004", "🦁 Lion", "🦁"},
-	{"demo-005", "🐺 Wolf", "🐺"},
-	{"demo-006", "🦈 Shark", "🦈"},
-	{"demo-007", "🦅 Falcon", "🦅"},
-	{"demo-008", "🐻 Bear", "🐻"},
-	{"demo-009", "🦂 Scorpion", "🦂"},
-	{"demo-010", "🦎 Gecko", "🦎"},
+	{"demo-player-001", "🦊 FireFox", "🦊"},
+	{"demo-player-002", "🐉 Dragon", "🐉"},
+	{"demo-player-003", "🦅 Eagle", "🦅"},
+	{"demo-player-004", "🦁 Lion", "🦁"},
+	{"demo-player-005", "🐺 Wolf", "🐺"},
+	{"demo-player-006", "🦈 Shark", "🦈"},
+	{"demo-player-007", "🦅 Falcon", "🦅"},
+	{"demo-player-008", "🐻 Bear", "🐻"},
+	{"demo-player-009", "🦂 Scorpion", "🦂"},
+	{"demo-player-010", "🦎 Gecko", "🦎"},
 }
 
 func main() {
@@ -74,14 +74,14 @@ func main() {
 
 	ctx := context.Background()
 
-	// Initialize players with spread-out scores
+	// Initialize players with high scores to appear at top of leaderboard
 	players := make([]*Player, len(demoPlayers))
-	baseScore := int64(10000)
+	baseScore := int64(2000000) // Start at 2M to be above existing players
 	for i, p := range demoPlayers {
 		players[i] = &Player{
 			ID:       p.ID,
 			Username: p.Username,
-			Score:    baseScore - int64(i*1000), // 10000, 9000, 8000, ...
+			Score:    baseScore - int64(i*50000), // 2M, 1.95M, 1.9M, ...
 			Rank:     i + 1,
 		}
 	}
@@ -132,7 +132,7 @@ func main() {
 		var targetScore int64
 		for _, p := range players {
 			if p.Rank == targetRank {
-				targetScore = p.Score + int64(rand.Intn(500)+100) // Beat by 100-600
+				targetScore = p.Score + int64(rand.Intn(25000)+5000) // Beat by 5K-30K
 				break
 			}
 		}

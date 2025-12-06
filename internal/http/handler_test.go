@@ -19,6 +19,15 @@ type mockNakamaClient struct {
 	getLeaderboardResult *leaderboard.LeaderboardResult
 }
 
+func (m *mockNakamaClient) SubmitScore(ctx context.Context, sub leaderboard.ScoreSubmission) (*leaderboard.LeaderboardRecord, error) {
+	return &leaderboard.LeaderboardRecord{
+		LeaderboardID: sub.LeaderboardID,
+		OwnerID:       sub.UserID,
+		Score:         sub.Score,
+		Rank:          1,
+	}, nil
+}
+
 func (m *mockNakamaClient) GetLeaderboard(ctx context.Context, req leaderboard.GetLeaderboardRequest) (*leaderboard.LeaderboardResult, error) {
 	if m.getLeaderboardResult != nil {
 		return m.getLeaderboardResult, nil
