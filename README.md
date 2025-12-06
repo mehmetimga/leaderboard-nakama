@@ -71,7 +71,7 @@ A production-ready leaderboard service built with Go and [Nakama](https://heroic
 
 | Flow | Path | Description |
 |------|------|-------------|
-| **Score Ingestion** | Game Server → Kafka → API Consumer → Nakama | All scores via Kafka |
+| **Score Ingestion** | Game Server → Kafka → Leaderboard Service → Nakama | All scores via Kafka |
 | **Read Leaderboard** | Web Client → HTTP GET → API → Nakama | Direct read |
 | **Real-time Updates** | API → WebSocket → Web Client | Direct push to clients |
 
