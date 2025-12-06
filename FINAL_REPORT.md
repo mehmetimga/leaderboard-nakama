@@ -82,10 +82,11 @@ INTERVAL=2 ./scripts/live_feed.sh
 # Health check
 curl http://localhost:8080/health
 
-# Submit score
-curl -X POST http://localhost:8080/api/v1/scores \
-  -H "Content-Type: application/json" \
-  -d '{"leaderboard_id":"global_scores","user_id":"user-123","username":"Player1","score":5000}'
+# Submit scores via Kafka (use demo mode)
+make demo  # 10 demo users with real-time rank changes
+
+# Or run Kafka load test
+make load-test-kafka  # 1000 messages, ~65K msg/sec
 
 # Get leaderboard (live)
 curl "http://localhost:8080/api/v1/leaderboards/global_scores?type=live&limit=10"

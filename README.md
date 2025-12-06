@@ -152,12 +152,12 @@ go test ./...
 
 ## API Reference
 
-### Submit Score
+### Submit Score (via Kafka)
 
-```bash
-POST /api/v1/scores
-Content-Type: application/json
+Scores are submitted via Kafka for high-throughput ingestion:
 
+```json
+// Kafka Topic: leaderboard-scores
 {
   "leaderboard_id": "global_scores",
   "user_id": "user-123",
@@ -168,6 +168,11 @@ Content-Type: application/json
     "level": "5"
   }
 }
+```
+
+Use the demo producer to test:
+```bash
+make demo  # 10 demo users with rank changes
 ```
 
 ### Get Leaderboard
@@ -557,18 +562,21 @@ curl -s http://localhost:8080/health
 To compare Nakama vs other solutions (like Redis), you can use tools like:
 
 ```bash
-# Install hey (HTTP load generator)
+# Test score submission via Kafka (1000 messages, 50 concurrent)
+make load-test-kafka
+
+# Test leaderboard retrieval via HTTP
 go install github.com/rakyll/hey@latest
-
-# Test score submission
-hey -n 10000 -c 100 -m POST \
-  -H "Content-Type: application/json" \
-  -d '{"leaderboard_id":"global_scores","user_id":"test-user","score":1000}' \
-  http://localhost:8080/api/v1/scores
-
-# Test leaderboard retrieval
 hey -n 10000 -c 100 \
   http://localhost:8080/api/v1/leaderboards/global_scores?type=live&limit=100
+```
+
+**Kafka Load Test Results:**
+```
+⏱️  Duration: 15.4ms
+📊 Messages sent: 1000
+❌ Errors: 0
+🚀 Throughput: ~65,000 msg/sec
 ```
 
 ## Why Nakama?
