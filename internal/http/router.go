@@ -32,10 +32,7 @@ func NewRouter(handler *Handler, wsHandler *websocket.Handler) *chi.Mux {
 
 	// API routes
 	r.Route("/api/v1", func(r chi.Router) {
-		// Score submission
-		r.Post("/scores", handler.SubmitScore)
-
-		// Leaderboard operations
+		// Leaderboard operations (scores are ingested via Kafka)
 		r.Route("/leaderboards/{id}", func(r chi.Router) {
 			r.Get("/", handler.GetLeaderboard)
 			r.Get("/around/{userId}", handler.GetAroundUser)

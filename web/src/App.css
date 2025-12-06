@@ -158,36 +158,9 @@ body {
 .main-content {
   position: relative;
   z-index: 1;
-  max-width: 1400px;
+  max-width: 900px;
   margin: 0 auto;
   padding: 0 2rem 4rem;
-}
-
-.content-grid {
-  display: grid;
-  grid-template-columns: 1fr 380px;
-  gap: 2rem;
-  align-items: start;
-}
-
-@media (max-width: 1024px) {
-  .content-grid {
-    grid-template-columns: 1fr;
-  }
-  
-  .sidebar {
-    order: -1;
-  }
-}
-
-/* Sections */
-.leaderboard-section {
-  min-height: 600px;
-}
-
-.sidebar {
-  position: sticky;
-  top: 2rem;
 }
 
 /* Footer */

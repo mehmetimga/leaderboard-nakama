@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import { Leaderboard } from './components/Leaderboard'
-import { ScoreSubmitter } from './components/ScoreSubmitter'
 import { ConnectionStatus } from './components/ConnectionStatus'
 import { Trophy, Zap } from 'lucide-react'
 import './App.css'
@@ -28,19 +27,11 @@ function App() {
       </header>
 
       <main className="main-content">
-        <div className="content-grid">
-          <section className="leaderboard-section">
-            <Leaderboard leaderboardId={leaderboardId} />
-          </section>
-
-          <aside className="sidebar">
-            <ScoreSubmitter leaderboardId={leaderboardId} />
-          </aside>
-        </div>
+        <Leaderboard leaderboardId={leaderboardId} />
       </main>
 
       <footer className="footer">
-        <p>WebSocket connected for real-time updates</p>
+        <p>Scores ingested via Kafka • Real-time updates via WebSocket</p>
       </footer>
     </div>
   )

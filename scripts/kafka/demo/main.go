@@ -116,18 +116,18 @@ func main() {
 	updateCount := 0
 	for range ticker.C {
 		updateCount++
-		
+
 		// Pick a random player (not the top player, so there's room to go up)
 		playerIdx := rand.Intn(len(players)-1) + 1 // Skip index 0 (top player)
 		player := players[playerIdx]
-		
+
 		// Calculate a score that will move them up by 1-3 ranks
 		rankJump := rand.Intn(3) + 1 // Jump 1-3 positions
 		targetRank := player.Rank - rankJump
 		if targetRank < 1 {
 			targetRank = 1
 		}
-		
+
 		// Find the player at target rank and beat their score
 		var targetScore int64
 		for _, p := range players {
@@ -136,7 +136,7 @@ func main() {
 				break
 			}
 		}
-		
+
 		oldRank := player.Rank
 		oldScore := player.Score
 		player.Score = targetScore
@@ -151,7 +151,7 @@ func main() {
 		recalculateRanks(players)
 
 		// Show the update
-		fmt.Printf("[%s] 🎯 Update #%d: %s\n", 
+		fmt.Printf("[%s] 🎯 Update #%d: %s\n",
 			time.Now().Format("15:04:05"),
 			updateCount,
 			player.Username)
@@ -161,7 +161,7 @@ func main() {
 			fmt.Printf(" ⬆️ UP %d", oldRank-player.Rank)
 		}
 		fmt.Println()
-		
+
 		// Show current standings every 5 updates
 		if updateCount%5 == 0 {
 			fmt.Println()

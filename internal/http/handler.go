@@ -32,57 +32,6 @@ type Response struct {
 	Error   string      `json:"error,omitempty"`
 }
 
-// SubmitScoreRequest represents the request body for score submission
-type SubmitScoreRequest struct {
-	LeaderboardID string            `json:"leaderboard_id"`
-	UserID        string            `json:"user_id"`
-	Username      string            `json:"username,omitempty"`
-	Score         int64             `json:"score"`
-	Subscore      int64             `json:"subscore,omitempty"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
-}
-
-// SubmitScore handles POST /api/v1/scores
-func (h *Handler) SubmitScore(w http.ResponseWriter, r *http.Request) {
-	var req SubmitScoreRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-
-	record, err := h.service.SubmitScore(r.Context(), leaderboard.ScoreSubmission{
-		LeaderboardID: req.LeaderboardID,
-		UserID:        req.UserID,
-		Username:      req.Username,
-		Score:         req.Score,
-		Subscore:      req.Subscore,
-		Metadata:      req.Metadata,
-	})
-	if err != nil {
-		h.writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Broadcast score update via WebSocket
-	if h.wsHub != nil {
-		h.wsHub.BroadcastScoreUpdate(req.LeaderboardID, record)
-		
-		// Also broadcast updated leaderboard
-		go func() {
-			result, err := h.service.GetLeaderboard(r.Context(), leaderboard.GetLeaderboardRequest{
-				LeaderboardID: req.LeaderboardID,
-				Type:          leaderboard.LiveLeaderboard,
-				Limit:         100,
-			})
-			if err == nil {
-				h.wsHub.BroadcastLeaderboardUpdate(req.LeaderboardID, result)
-			}
-		}()
-	}
-
-	h.writeJSON(w, http.StatusOK, Response{Success: true, Data: record})
-}
-
 // GetLeaderboard handles GET /api/v1/leaderboards/{id}
 func (h *Handler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
 	leaderboardID := chi.URLParam(r, "id")

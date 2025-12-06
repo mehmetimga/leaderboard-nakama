@@ -97,13 +97,13 @@ demo: ## 🎮 Demo mode: 10 users with visible rank changes (recommended for tes
 	@echo "🎮 Starting Demo Mode..."
 	@echo "📺 Open http://localhost:3000 to watch!"
 	@echo ""
-	@go run ./scripts/kafka/demo_producer.go
+	@go run ./scripts/kafka/demo/main.go
 
 demo-fast: ## 🚀 Fast demo: rank changes every 1 second
-	@go run ./scripts/kafka/demo_producer.go --interval=1s
+	@go run ./scripts/kafka/demo/main.go --interval=1s
 
 demo-slow: ## 🐢 Slow demo: rank changes every 5 seconds
-	@go run ./scripts/kafka/demo_producer.go --interval=5s
+	@go run ./scripts/kafka/demo/main.go --interval=5s
 
 # Full stack commands
 stack-up: ## Start full stack (Kafka + Nakama + PostgreSQL + API + Web)

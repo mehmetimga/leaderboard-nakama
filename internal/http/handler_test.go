@@ -1,7 +1,6 @@
 package http
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -18,15 +17,6 @@ import (
 // mockNakamaClient implements leaderboard.NakamaClient for testing
 type mockNakamaClient struct {
 	getLeaderboardResult *leaderboard.LeaderboardResult
-}
-
-func (m *mockNakamaClient) SubmitScore(ctx context.Context, sub leaderboard.ScoreSubmission) (*leaderboard.LeaderboardRecord, error) {
-	return &leaderboard.LeaderboardRecord{
-		LeaderboardID: sub.LeaderboardID,
-		OwnerID:       sub.UserID,
-		Score:         sub.Score,
-		Rank:          1,
-	}, nil
 }
 
 func (m *mockNakamaClient) GetLeaderboard(ctx context.Context, req leaderboard.GetLeaderboardRequest) (*leaderboard.LeaderboardResult, error) {
@@ -85,70 +75,6 @@ func (m *mockRepository) CleanupOldSnapshots(ctx context.Context, leaderboardID 
 
 func (m *mockRepository) HealthCheck(ctx context.Context) error {
 	return nil
-}
-
-func TestSubmitScoreHandler(t *testing.T) {
-	t.Run("invalid request body", func(t *testing.T) {
-		service := leaderboard.NewService(&mockNakamaClient{}, &mockRepository{})
-		handler := NewHandler(service, nil)
-
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/scores", bytes.NewReader([]byte("invalid json")))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-
-		handler.SubmitScore(rec, req)
-
-		assert.Equal(t, http.StatusBadRequest, rec.Code)
-
-		var resp Response
-		err := json.NewDecoder(rec.Body).Decode(&resp)
-		require.NoError(t, err)
-		assert.False(t, resp.Success)
-	})
-
-	t.Run("valid request", func(t *testing.T) {
-		service := leaderboard.NewService(&mockNakamaClient{}, &mockRepository{})
-		handler := NewHandler(service, nil)
-
-		body := SubmitScoreRequest{
-			LeaderboardID: "global_scores",
-			UserID:        "user-123",
-			Score:         1000,
-		}
-		bodyBytes, _ := json.Marshal(body)
-
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/scores", bytes.NewReader(bodyBytes))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-
-		handler.SubmitScore(rec, req)
-
-		assert.Equal(t, http.StatusOK, rec.Code)
-
-		var resp Response
-		err := json.NewDecoder(rec.Body).Decode(&resp)
-		require.NoError(t, err)
-		assert.True(t, resp.Success)
-	})
-
-	t.Run("missing required fields", func(t *testing.T) {
-		service := leaderboard.NewService(&mockNakamaClient{}, &mockRepository{})
-		handler := NewHandler(service, nil)
-
-		body := SubmitScoreRequest{
-			Score: 1000,
-			// Missing LeaderboardID and UserID
-		}
-		bodyBytes, _ := json.Marshal(body)
-
-		req := httptest.NewRequest(http.MethodPost, "/api/v1/scores", bytes.NewReader(bodyBytes))
-		req.Header.Set("Content-Type", "application/json")
-		rec := httptest.NewRecorder()
-
-		handler.SubmitScore(rec, req)
-
-		assert.Equal(t, http.StatusInternalServerError, rec.Code)
-	})
 }
 
 func TestGetLeaderboardHandler(t *testing.T) {
