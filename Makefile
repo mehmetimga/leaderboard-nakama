@@ -60,12 +60,9 @@ db-migrate: ## Run database migrations
 dev: deps-up run ## Start dependencies and run locally
 
 # Load testing
-load-test-write: ## Run load test for score submission
-	@echo "Running load test for score submission..."
-	hey -n 1000 -c 50 -m POST \
-		-H "Content-Type: application/json" \
-		-d '{"leaderboard_id":"global_scores","user_id":"load-test-user","score":1000}' \
-		http://localhost:8080/api/v1/scores
+load-test-kafka: ## Run load test via Kafka (1000 messages)
+	@echo "Running Kafka load test (1000 messages)..."
+	@go run ./scripts/kafka/loadtest/main.go --count=1000 --concurrency=50
 
 load-test-read: ## Run load test for leaderboard retrieval
 	@echo "Running load test for leaderboard retrieval..."
