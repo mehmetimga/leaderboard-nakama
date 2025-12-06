@@ -11,6 +11,7 @@ import (
 
 	"github.com/ai-campions/leaderboard-nakama/internal/config"
 	httpPkg "github.com/ai-campions/leaderboard-nakama/internal/http"
+	"github.com/ai-campions/leaderboard-nakama/internal/kafka"
 	"github.com/ai-campions/leaderboard-nakama/internal/leaderboard"
 	"github.com/ai-campions/leaderboard-nakama/internal/nakama"
 	"github.com/ai-campions/leaderboard-nakama/internal/postgres"
@@ -74,6 +75,15 @@ func main() {
 
 		snapshotWorker.Start(ctx)
 		defer snapshotWorker.Stop()
+	}
+
+	// Initialize and start Kafka consumer
+	var kafkaConsumer *kafka.Consumer
+	if cfg.Kafka.Enabled {
+		kafkaConsumer = kafka.NewConsumer(cfg.Kafka, service, wsHub)
+		kafkaConsumer.Start(ctx)
+		defer kafkaConsumer.Stop()
+		log.Printf("Kafka consumer started - brokers: %v, topic: %s", cfg.Kafka.Brokers, cfg.Kafka.Topic)
 	}
 
 	// Create HTTP server

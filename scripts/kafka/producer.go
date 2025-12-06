@@ -1,22 +1,24 @@
-// feed_data.go - Go script for high-performance data feeding
+// producer.go - Kafka producer for feeding leaderboard scores
 package main
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"math/rand"
-	"net/http"
 	"os"
 	"os/signal"
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/segmentio/kafka-go"
 )
 
 var (
-	apiURL        = flag.String("url", "http://localhost:8080", "API base URL")
+	brokers       = flag.String("brokers", "localhost:9092", "Kafka broker addresses (comma-separated)")
+	topic         = flag.String("topic", "leaderboard-scores", "Kafka topic")
 	leaderboardID = flag.String("lb", "global_scores", "Leaderboard ID")
 	interval      = flag.Duration("interval", 1*time.Second, "Interval between submissions")
 	burst         = flag.Int("burst", 1, "Number of submissions per interval")
@@ -36,32 +38,37 @@ var nouns = []string{
 	"Warrior", "Legend", "Master", "Champion", "Slayer", "Destroyer", "Avenger",
 }
 
-type ScoreSubmission struct {
-	LeaderboardID string `json:"leaderboard_id"`
-	UserID        string `json:"user_id"`
-	Username      string `json:"username"`
-	Score         int64  `json:"score"`
+type ScoreMessage struct {
+	LeaderboardID string            `json:"leaderboard_id"`
+	UserID        string            `json:"user_id"`
+	Username      string            `json:"username"`
+	Score         int64             `json:"score"`
+	Subscore      int64             `json:"subscore,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
-type APIResponse struct {
-	Success bool        `json:"success"`
-	Data    interface{} `json:"data"`
-	Error   string      `json:"error"`
-}
-
-var httpClient = &http.Client{
-	Timeout: 5 * time.Second,
-}
-
-var submitCount int64
+var (
+	writer      *kafka.Writer
+	submitCount int64
+)
 
 func main() {
 	flag.Parse()
 	rand.Seed(time.Now().UnixNano())
 
-	fmt.Println("🎮 Leaderboard Data Feeder")
-	fmt.Printf("📡 API: %s\n", *apiURL)
+	fmt.Println("🎮 Kafka Leaderboard Producer")
+	fmt.Printf("📡 Brokers: %s\n", *brokers)
+	fmt.Printf("📬 Topic: %s\n", *topic)
 	fmt.Printf("🏆 Leaderboard: %s\n", *leaderboardID)
+
+	// Initialize Kafka writer
+	writer = &kafka.Writer{
+		Addr:         kafka.TCP(*brokers),
+		Topic:        *topic,
+		Balancer:     &kafka.LeastBytes{},
+		BatchTimeout: 10 * time.Millisecond,
+	}
+	defer writer.Close()
 
 	if *seed {
 		fmt.Printf("🌱 Seeding %d users...\n\n", *seedCount)
@@ -71,7 +78,7 @@ func main() {
 
 	fmt.Printf("⏱️  Interval: %v\n", *interval)
 	fmt.Printf("💥 Burst: %d per interval\n", *burst)
-	fmt.Println("\n🔴 LIVE FEED - Press Ctrl+C to stop")
+	fmt.Println("\n🔴 LIVE KAFKA FEED - Press Ctrl+C to stop")
 
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -79,6 +86,8 @@ func main() {
 
 	ticker := time.NewTicker(*interval)
 	defer ticker.Stop()
+
+	ctx := context.Background()
 
 	for {
 		select {
@@ -88,61 +97,55 @@ func main() {
 			return
 		case <-ticker.C:
 			for i := 0; i < *burst; i++ {
-				go submitRandomScore()
+				go submitRandomScore(ctx)
 			}
 		}
 	}
 }
 
 func seedData() {
+	ctx := context.Background()
 	for i := 0; i < *seedCount; i++ {
-		submitRandomScore()
+		submitRandomScore(ctx)
 		time.Sleep(50 * time.Millisecond)
 	}
-	fmt.Printf("\n✅ Seeded %d users!\n", *seedCount)
+	fmt.Printf("\n✅ Seeded %d users via Kafka!\n", *seedCount)
 }
 
-func submitRandomScore() {
+func submitRandomScore(ctx context.Context) {
 	username := generateUsername()
 	userID := fmt.Sprintf("user-%s", randomString(8))
 	score := rand.Int63n(95000) + 5000
 
-	submission := ScoreSubmission{
+	msg := ScoreMessage{
 		LeaderboardID: *leaderboardID,
 		UserID:        userID,
 		Username:      username,
 		Score:         score,
 	}
 
-	body, _ := json.Marshal(submission)
-	resp, err := httpClient.Post(
-		*apiURL+"/api/v1/scores",
-		"application/json",
-		bytes.NewReader(body),
-	)
-	if err != nil {
-		fmt.Printf("❌ Error: %v\n", err)
-		return
-	}
-	defer resp.Body.Close()
+	body, _ := json.Marshal(msg)
 
-	var apiResp APIResponse
-	json.NewDecoder(resp.Body).Decode(&apiResp)
+	err := writer.WriteMessages(ctx, kafka.Message{
+		Key:   []byte(userID),
+		Value: body,
+	})
 
 	count := atomic.AddInt64(&submitCount, 1)
 	timestamp := time.Now().Format("15:04:05")
 
-	if apiResp.Success {
-		icon := "📊"
-		if score > 80000 {
-			icon = "🏆"
-		} else if score > 50000 {
-			icon = "⭐"
-		}
-		fmt.Printf("[%s] %s #%d %s: %d pts\n", timestamp, icon, count, username, score)
-	} else {
-		fmt.Printf("[%s] ❌ #%d Failed: %s\n", timestamp, count, apiResp.Error)
+	if err != nil {
+		fmt.Printf("[%s] ❌ #%d Failed: %v\n", timestamp, count, err)
+		return
 	}
+
+	icon := "📊"
+	if score > 80000 {
+		icon = "🏆"
+	} else if score > 50000 {
+		icon = "⭐"
+	}
+	fmt.Printf("[%s] %s #%d %s: %d pts (via Kafka)\n", timestamp, icon, count, username, score)
 }
 
 func generateUsername() string {
@@ -160,4 +163,3 @@ func randomString(n int) string {
 	}
 	return string(b)
 }
-

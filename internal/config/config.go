@@ -14,6 +14,7 @@ type Config struct {
 	Nakama   NakamaConfig
 	Postgres PostgresConfig
 	Worker   WorkerConfig
+	Kafka    KafkaConfig
 }
 
 // ServerConfig holds HTTP server settings
@@ -48,6 +49,14 @@ type WorkerConfig struct {
 	Enabled          bool
 }
 
+// KafkaConfig holds Kafka connection settings
+type KafkaConfig struct {
+	Enabled bool
+	Brokers []string
+	Topic   string
+	GroupID string
+}
+
 // Load reads configuration from environment variables
 func Load() (*Config, error) {
 	// Load .env file if it exists (ignore error if not found)
@@ -78,6 +87,12 @@ func Load() (*Config, error) {
 			SnapshotInterval: getDuration("WORKER_SNAPSHOT_INTERVAL", 30*time.Minute),
 			Enabled:          getBool("WORKER_ENABLED", true),
 		},
+		Kafka: KafkaConfig{
+			Enabled: getBool("KAFKA_ENABLED", false),
+			Brokers: getStringSlice("KAFKA_BROKERS", []string{"localhost:9092"}),
+			Topic:   getEnv("KAFKA_TOPIC", "leaderboard-scores"),
+			GroupID: getEnv("KAFKA_GROUP_ID", "leaderboard-consumer"),
+		},
 	}, nil
 }
 
@@ -91,6 +106,46 @@ func getEnv(key, defaultVal string) string {
 		return val
 	}
 	return defaultVal
+}
+
+func getStringSlice(key string, defaultVal []string) []string {
+	val := os.Getenv(key)
+	if val == "" {
+		return defaultVal
+	}
+	var result []string
+	for _, s := range splitString(val, ',') {
+		trimmed := trimString(s)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func splitString(s string, sep byte) []string {
+	var result []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == sep {
+			result = append(result, s[start:i])
+			start = i + 1
+		}
+	}
+	result = append(result, s[start:])
+	return result
+}
+
+func trimString(s string) string {
+	start := 0
+	end := len(s)
+	for start < end && (s[start] == ' ' || s[start] == '\t') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
+		end--
+	}
+	return s[start:end]
 }
 
 func getBool(key string, defaultVal bool) bool {

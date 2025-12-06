@@ -85,3 +85,63 @@ feed-go: ## Run Go-based data feeder (--seed for initial data, otherwise live fe
 seed-go: ## Seed 50 users using Go feeder
 	@go run ./scripts/feed_data.go --seed --seed-count=50
 
+# Kafka data feeding (recommended)
+kafka-feed: ## Start Kafka-based live feed (recommended)
+	@go run ./scripts/kafka/producer.go $(ARGS)
+
+kafka-seed: ## Seed 50 users via Kafka
+	@go run ./scripts/kafka/producer.go --seed --seed-count=50
+
+# Demo mode - 10 users with visible rank changes
+demo: ## 🎮 Demo mode: 10 users with visible rank changes (recommended for testing)
+	@echo "🎮 Starting Demo Mode..."
+	@echo "📺 Open http://localhost:3000 to watch!"
+	@echo ""
+	@go run ./scripts/kafka/demo_producer.go
+
+demo-fast: ## 🚀 Fast demo: rank changes every 1 second
+	@go run ./scripts/kafka/demo_producer.go --interval=1s
+
+demo-slow: ## 🐢 Slow demo: rank changes every 5 seconds
+	@go run ./scripts/kafka/demo_producer.go --interval=5s
+
+# Full stack commands
+stack-up: ## Start full stack (Kafka + Nakama + PostgreSQL + API + Web)
+	$(DOCKER_COMPOSE) up -d
+	@echo "⏳ Waiting for services to be healthy..."
+	@sleep 10
+	@echo "✅ Stack is up! Services:"
+	@echo "   - Web UI: http://localhost:3000"
+	@echo "   - API: http://localhost:8080"
+	@echo "   - Nakama Console: http://localhost:7351 (admin/password)"
+	@echo "   - Kafka: localhost:9092"
+
+stack-down: ## Stop full stack
+	$(DOCKER_COMPOSE) down
+
+stack-logs: ## View all logs
+	$(DOCKER_COMPOSE) logs -f
+
+# Development with Kafka
+dev-kafka: ## Start dependencies with Kafka and run API locally
+	$(DOCKER_COMPOSE) up -d postgres nakama zookeeper kafka
+	@echo "⏳ Waiting for Kafka to be ready..."
+	@sleep 15
+	@echo "✅ Dependencies ready! Starting API..."
+	KAFKA_ENABLED=true KAFKA_BROKERS=localhost:9092 $(GO) run ./cmd/api
+
+# Health check
+health: ## Check health of all services
+	@echo "🔍 Checking services..."
+	@curl -s http://localhost:8080/health | jq . || echo "❌ API not responding"
+	@echo ""
+	@curl -s http://localhost:7350/healthcheck | jq . || echo "❌ Nakama not responding"
+
+# Quick test
+test-realtime: ## Test real-time updates (run in separate terminal after stack-up)
+	@echo "🧪 Testing real-time updates via Kafka..."
+	@echo "📺 Open http://localhost:3000 in browser"
+	@echo "⏳ Sending 10 scores via Kafka in 3 seconds..."
+	@sleep 3
+	@go run ./scripts/kafka/producer.go --seed --seed-count=10
+	@echo "✅ Check browser for real-time updates!"

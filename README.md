@@ -9,40 +9,81 @@ A production-ready leaderboard service built with Go and [Nakama](https://heroic
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                      React Web UI (:3000)                       │
-│              Real-time updates via WebSocket                    │
-├─────────────────────────────────────────────────────────────────┤
-                              │ WebSocket
-                              ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Leaderboard API (:8080)                      │
-│                      (Go + Chi + WS Hub)                        │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────┐  │
-│  │   HTTP      │  │  WebSocket   │  │    Background         │  │
-│  │  Handlers   │  │     Hub      │  │    Worker             │  │
-│  └──────┬──────┘  └──────┬───────┘  └───────────┬───────────┘  │
-│         └────────────────┼──────────────────────┘              │
-│                          ▼                                      │
-│                 ┌──────────────┐                                │
-│                 │  Leaderboard │                                │
-│                 │   Service    │                                │
-│                 └──────┬───────┘                                │
-│         ┌──────────────┴──────────────┐                        │
-│         ▼                             ▼                        │
-│  ┌────────────┐               ┌────────────────┐               │
-│  │   Nakama   │               │   PostgreSQL   │               │
-│  │  (Live LB) │               │ (Official LB)  │               │
-│  └────────────┘               └────────────────┘               │
-└─────────────────────────────────────────────────────────────────┘
+                    ┌─────────────────────────────────┐
+                    │      React Web UI (:3000)       │
+                    │   Real-time updates via WS      │
+                    └───────────────┬─────────────────┘
+                                    │
+                    ┌───────────────┴─────────────────┐
+                    │  HTTP (read)    WebSocket (push)│
+                    │       │              ▲          │
+                    │       ▼              │          │
+┌───────────────┐   │  ┌────────────────────────┐    │   ┌───────────────┐
+│ Game Servers  │   │  │  Leaderboard API       │    │   │ Game Servers  │
+│  (low load)   │──▶│  │      (:8080)           │    │◀──│  (high load)  │
+│   HTTP POST   │   │  └───────────┬────────────┘    │   │    Kafka      │
+└───────────────┘   │              │                 │   └───────┬───────┘
+                    │              │                 │           │
+                    └──────────────┼─────────────────┘           │
+                                   │                             │
+                    ┌──────────────┴──────────────┐              │
+                    ▼                             ▼              │
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        Leaderboard API (:8080)                          │
+├─────────────────────────────────────────────────────────────────────────┤
+│                                                                         │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐  ┌──────────────┐  │
+│  │    HTTP     │  │  WebSocket   │  │   Kafka     │  │  Background  │  │
+│  │  Handlers   │  │     Hub      │  │  Consumer   │  │   Worker     │  │
+│  │  (read)     │  │  (push)      │  │  (write)    │  │  (snapshot)  │  │
+│  └──────┬──────┘  └──────┬───────┘  └──────┬──────┘  └──────┬───────┘  │
+│         │                │                 │                │          │
+│         └────────────────┴────────┬────────┴────────────────┘          │
+│                                   ▼                                     │
+│                          ┌──────────────┐                               │
+│                          │  Leaderboard │                               │
+│                          │   Service    │                               │
+│                          └──────┬───────┘                               │
+│                  ┌──────────────┴──────────────┐                        │
+│                  ▼                             ▼                        │
+│           ┌────────────┐               ┌────────────────┐               │
+│           │   Nakama   │               │   PostgreSQL   │               │
+│           │  (Live LB) │               │ (Official LB)  │               │
+│           └────────────┘               └────────────────┘               │
+└─────────────────────────────────────────────────────────────────────────┘
+                                   ▲
+                                   │ Consume Scores
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         Kafka (:9092)                                   │
+│                   Topic: leaderboard-scores                             │
+│          (for HIGH LOAD score ingestion from game servers)              │
+├─────────────────────────────────────────────────────────────────────────┤
+│           ┌─────────────────────────────────────────────┐               │
+│           │              Zookeeper (:2181)              │               │
+│           └─────────────────────────────────────────────┘               │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Data Flow
+
+| Flow | Path | Description |
+|------|------|-------------|
+| **Score Ingestion (high load)** | Game Server → Kafka → API Consumer → Nakama | Scores via Kafka for scalable ingestion |
+| **Score Ingestion (low load)** | Game Server → HTTP POST → API → Nakama | Direct HTTP for simple cases |
+| **Read Leaderboard** | Web Client → HTTP GET → API → Nakama | Direct read, no Kafka |
+| **Real-time Updates** | API → WebSocket → Web Client | Direct push to clients |
 
 ### Key Components
 
 - **Live Leaderboard**: Real-time rankings via Nakama's built-in leaderboard system
 - **Official Leaderboard**: Periodic snapshots stored in PostgreSQL (configurable interval, default 30 min)
 - **Background Worker**: Automatically snapshots live leaderboards to PostgreSQL
+- **Kafka Consumer**: Receives score submissions from Kafka topic for **high-load score ingestion only**
+- **WebSocket Hub**: Pushes real-time updates **directly** to web clients (no Kafka)
+- **HTTP Handlers**: Serve leaderboard reads **directly** from Nakama/PostgreSQL (no Kafka)
+
+> **Note**: Kafka is used **only for score ingestion** (write path) to handle high load from game servers. 
+> Web clients read leaderboards and receive updates **directly** from the API via HTTP/WebSocket.
 
 ## Features
 
@@ -81,7 +122,9 @@ Services will be available at:
 - **WebSocket**: ws://localhost:8080/ws
 - **Nakama Console**: http://localhost:7351 (admin/password)
 - **Nakama HTTP API**: http://localhost:7350
-- **PostgreSQL**: localhost:5432
+- **PostgreSQL**: localhost:5434
+- **Kafka**: localhost:9092
+- **Zookeeper**: localhost:2181
 
 ### Local Development
 
@@ -220,6 +263,10 @@ GET /health
 | `WORKER_ENABLED` | true | Enable snapshot worker |
 | `WORKER_SNAPSHOT_INTERVAL` | 30m | Snapshot interval |
 | `SNAPSHOT_LEADERBOARDS` | | Comma-separated list of leaderboards to snapshot |
+| `KAFKA_ENABLED` | false | Enable Kafka consumer |
+| `KAFKA_BROKERS` | localhost:9092 | Kafka broker addresses (comma-separated) |
+| `KAFKA_TOPIC` | leaderboard-scores | Kafka topic for score messages |
+| `KAFKA_GROUP_ID` | leaderboard-consumer | Kafka consumer group ID |
 
 ## Setting Up Leaderboards in Nakama
 
@@ -303,9 +350,10 @@ The project includes scripts for seeding test data and testing real-time functio
 
 | Script | Description | Usage |
 |--------|-------------|-------|
-| `scripts/seed_data.sh` | Seeds 20 random users with gamer names | `./scripts/seed_data.sh` |
-| `scripts/live_feed.sh` | Continuous score submission (configurable) | `INTERVAL=2 ./scripts/live_feed.sh` |
-| `scripts/feed_data.go` | High-performance Go data feeder | `go run ./scripts/feed_data.go` |
+| `scripts/seed_data.sh` | Seeds 20 random users with gamer names (HTTP) | `./scripts/seed_data.sh` |
+| `scripts/live_feed.sh` | Continuous score submission via HTTP | `INTERVAL=2 ./scripts/live_feed.sh` |
+| `scripts/feed_data.go` | High-performance Go data feeder (HTTP) | `go run ./scripts/feed_data.go` |
+| `scripts/kafka/producer.go` | **Kafka-based data feeder (recommended)** | `go run ./scripts/kafka/producer.go` |
 
 ### Seed Data
 
@@ -359,7 +407,7 @@ make live-feed
 [10:15:36] 📊 #3 CyberNinja42: 28900 pts
 ```
 
-### Go Data Feeder (high-performance)
+### Go Data Feeder (HTTP - legacy)
 
 ```bash
 # Continuous feed (1 submission per second)
@@ -384,6 +432,47 @@ go run ./scripts/feed_data.go --url=http://api.example.com:8080
 | `--burst` | `1` | Submissions per interval |
 | `--seed` | `false` | Seed mode (batch insert, then exit) |
 | `--seed-count` | `50` | Number of users to seed |
+
+### Kafka Producer (recommended)
+
+The Kafka producer sends score messages directly to Kafka, which are then consumed by the leaderboard service. This provides better decoupling and scalability.
+
+```bash
+# Continuous feed via Kafka (1 submission per second)
+go run ./scripts/kafka/producer.go
+
+# Seed mode (50 users via Kafka, then exit)
+go run ./scripts/kafka/producer.go --seed --seed-count=50
+
+# Custom interval and burst
+go run ./scripts/kafka/producer.go --interval=500ms --burst=3
+
+# Custom Kafka brokers and topic
+go run ./scripts/kafka/producer.go --brokers=localhost:9092 --topic=leaderboard-scores
+```
+
+**Kafka Producer Options:**
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--brokers` | `localhost:9092` | Kafka broker addresses |
+| `--topic` | `leaderboard-scores` | Kafka topic |
+| `--lb` | `global_scores` | Leaderboard ID |
+| `--interval` | `1s` | Time between submissions |
+| `--burst` | `1` | Submissions per interval |
+| `--seed` | `false` | Seed mode (batch insert, then exit) |
+| `--seed-count` | `50` | Number of users to seed |
+
+**Kafka Message Format:**
+```json
+{
+  "leaderboard_id": "global_scores",
+  "user_id": "user-abc123",
+  "username": "SwiftPhantom42",
+  "score": 85432,
+  "subscore": 0,
+  "metadata": {}
+}
+```
 
 ## Testing Real-time Updates
 
