@@ -18,11 +18,11 @@ A production-ready leaderboard service built with Go and [Nakama](https://heroic
                     │  HTTP (read)    WebSocket (push)│
                     │       │              ▲          │
                     │       ▼              │          │
-┌───────────────┐   │  ┌────────────────────────┐    │   ┌───────────────┐
-│ Game Servers  │   │  │  Leaderboard API       │    │   │ Game Servers  │
-│  (low load)   │──▶│  │      (:8080)           │    │◀──│  (high load)  │
-│   HTTP POST   │   │  └───────────┬────────────┘    │   │    Kafka      │
-└───────────────┘   │              │                 │   └───────┬───────┘
+                   │  ┌────────────────────────┐    │   ┌───────────────┐
+                   │  │  Leaderboard API       │    │   │ Game Servers  │
+                   │  │      (:8080)           │    │◀──│               │
+                   │  └───────────┬────────────┘    │   │    Kafka      │
+                   │              │                 │   └───────┬───────┘
                     │              │                 │           │
                     └──────────────┼─────────────────┘           │
                                    │                             │
@@ -68,8 +68,7 @@ A production-ready leaderboard service built with Go and [Nakama](https://heroic
 
 | Flow | Path | Description |
 |------|------|-------------|
-| **Score Ingestion (high load)** | Game Server → Kafka → API Consumer → Nakama | Scores via Kafka for scalable ingestion |
-| **Score Ingestion (low load)** | Game Server → HTTP POST → API → Nakama | Direct HTTP for simple cases |
+| **Score Ingestion** | Game Server → Kafka → API Consumer → Nakama | All scores via Kafka for scalable ingestion |
 | **Read Leaderboard** | Web Client → HTTP GET → API → Nakama | Direct read, no Kafka |
 | **Real-time Updates** | API → WebSocket → Web Client | Direct push to clients |
 
@@ -78,12 +77,12 @@ A production-ready leaderboard service built with Go and [Nakama](https://heroic
 - **Live Leaderboard**: Real-time rankings via Nakama's built-in leaderboard system
 - **Official Leaderboard**: Periodic snapshots stored in PostgreSQL (configurable interval, default 30 min)
 - **Background Worker**: Automatically snapshots live leaderboards to PostgreSQL
-- **Kafka Consumer**: Receives score submissions from Kafka topic for **high-load score ingestion only**
-- **WebSocket Hub**: Pushes real-time updates **directly** to web clients (no Kafka)
-- **HTTP Handlers**: Serve leaderboard reads **directly** from Nakama/PostgreSQL (no Kafka)
+- **Kafka Consumer**: Receives **all** score submissions from Kafka topic
+- **WebSocket Hub**: Pushes real-time updates to web clients
+- **HTTP Handlers**: Serve leaderboard reads from Nakama/PostgreSQL (read-only)
 
-> **Note**: Kafka is used **only for score ingestion** (write path) to handle high load from game servers. 
-> Web clients read leaderboards and receive updates **directly** from the API via HTTP/WebSocket.
+> **Note**: All score submissions go through Kafka. The HTTP API is read-only for leaderboard queries.
+> Web clients receive real-time updates via WebSocket.
 
 ## Features
 
@@ -355,90 +354,63 @@ The project includes scripts for seeding test data and testing real-time functio
 
 | Script | Description | Usage |
 |--------|-------------|-------|
-| `scripts/seed_data.sh` | Seeds 20 random users with gamer names (HTTP) | `./scripts/seed_data.sh` |
-| `scripts/live_feed.sh` | Continuous score submission via HTTP | `INTERVAL=2 ./scripts/live_feed.sh` |
-| `scripts/feed_data.go` | High-performance Go data feeder (HTTP) | `go run ./scripts/feed_data.go` |
 | `scripts/kafka/producer.go` | **Kafka-based data feeder (recommended)** | `go run ./scripts/kafka/producer.go` |
+| `scripts/kafka/demo/main.go` | **Demo mode: 10 users with rank changes** | `make demo` |
+| `scripts/kafka/loadtest/main.go` | Kafka load test (65K msg/sec) | `make load-test-kafka` |
 
-### Seed Data
+### Seed Data (via Kafka)
 
 ```bash
-# Using shell script (creates 20 random users)
-./scripts/seed_data.sh
+# Seed 50 users via Kafka
+make kafka-seed
 
-# Using Go feeder (creates 50 random users)
-make seed-go
-
-# Or use the Makefile
-make seed
+# Or run demo mode (10 users with visible rank changes)
+make demo
 ```
 
 **Example Output:**
 ```
-🎮 Seeding leaderboard: global_scores
-📊 Creating 20 users...
+🎮 Demo Leaderboard Producer (10 Users)
+=========================================
+📡 Brokers: localhost:9092
+📬 Topic: leaderboard-scores
+🏆 Leaderboard: global_scores
 
-✅ TurboNova1: 16947 pts
-✅ DarkShadow2: 31679 pts
-✅ TurboGhost3: 9949 pts
-✅ UltraKnight5: 30835 pts
-...
-
-🏆 Seeding complete!
-📈 View leaderboard at: http://localhost:8080/api/v1/leaderboards/global_scores
+🌱 Seeding 10 demo players...
+   #1 🦊 FireFox: 2000000 pts
+   #2 🐉 Dragon: 1950000 pts
+   #3 🦅 Eagle: 1900000 pts
+   ...
+✅ Initial seeding complete!
 ```
 
-### Live Feed (for real-time testing)
+### Live Feed (via Kafka)
 
 ```bash
-# Start continuous score submission (every 2 seconds)
-./scripts/live_feed.sh
+# Demo mode: 10 users with visible rank changes (recommended)
+make demo
 
-# With custom interval (5 seconds)
-INTERVAL=5 ./scripts/live_feed.sh
+# Fast demo (1 second intervals)
+make demo-fast
 
-# Or use the Makefile
-make live-feed
+# Continuous Kafka feed
+make kafka-feed
 ```
 
 **Example Output:**
 ```
-🔴 LIVE FEED STARTED
-📡 Submitting scores every 2s to: global_scores
-🛑 Press Ctrl+C to stop
+🔄 Starting continuous rank changes...
+   Press Ctrl+C to stop
 
-[10:15:32] 🏆 #1 HIGH SCORE! SwiftLegend144: 85432 pts
-[10:15:34] ⭐ #2 DarkPhantom99: 62150 pts
-[10:15:36] 📊 #3 CyberNinja42: 28900 pts
+[10:15:24] 🎯 Update #1: 🐺 Wolf
+         Score: 1800000 → 1911111 (+111111)
+         Rank:  #5 → #3 ⬆️ UP 2
+[10:15:26] 🎯 Update #2: 🦂 Scorpion
+         Score: 1600000 → 1674438 (+74438)
+         Rank:  #9 → #8 ⬆️ UP 1
 ```
 
-### Go Data Feeder (HTTP - legacy)
-
-```bash
-# Continuous feed (1 submission per second)
-go run ./scripts/feed_data.go
-
-# Seed mode (50 users, then exit)
-go run ./scripts/feed_data.go --seed --seed-count=50
-
-# Custom interval and burst (3 submissions every 500ms)
-go run ./scripts/feed_data.go --interval=500ms --burst=3
-
-# Custom API URL
-go run ./scripts/feed_data.go --url=http://api.example.com:8080
-```
-
-**Options:**
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--url` | `http://localhost:8080` | API base URL |
-| `--lb` | `global_scores` | Leaderboard ID |
-| `--interval` | `1s` | Time between submissions |
-| `--burst` | `1` | Submissions per interval |
-| `--seed` | `false` | Seed mode (batch insert, then exit) |
-| `--seed-count` | `50` | Number of users to seed |
-
-### Kafka Producer (recommended)
+### Kafka Producer
 
 The Kafka producer sends score messages directly to Kafka, which are then consumed by the leaderboard service. This provides better decoupling and scalability.
 
@@ -504,27 +476,14 @@ Open http://localhost:5173 in your browser. You should see:
 - ✅ **WebSocket** indicator (green = connected)
 - 🏆 **Global Rankings** section with player count
 
-### Step 3: Seed Initial Data
+### Step 3: Start Demo Mode
 
 ```bash
-# Terminal 3: Seed data
-./scripts/seed_data.sh
+# Terminal 3: Run demo with 10 users
+make demo
 ```
 
-### Step 4: Test Real-time Updates
-
-```bash
-# Start live feed in background
-INTERVAL=3 ./scripts/live_feed.sh
-```
-
-Watch the browser - scores should update in real-time!
-
-### Step 5: Submit via UI
-
-1. Click **🎲 Generate Random** to fill in random data
-2. Click **Submit Score**
-3. Watch the leaderboard update instantly
+Watch the browser - scores should update in real-time with rank changes!
 
 ## Latest Test Results
 
